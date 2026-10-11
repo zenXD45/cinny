@@ -4,6 +4,7 @@ import {
   IThumbnailContent,
   MATRIX_BLUR_HASH_PROPERTY_NAME,
   MATRIX_SPOILER_PROPERTY_NAME,
+  MATRIX_VOICE_MESSAGE_PROPERTY_NAME,
 } from '../../../types/matrix/common';
 import {
   getImageFileUrl,
@@ -127,7 +128,7 @@ export const getVideoMsgContent = async (
 };
 
 export const getAudioMsgContent = (item: TUploadItem, mxc: string): IContent => {
-  const { file, encInfo } = item;
+  const { file, encInfo, metadata } = item;
   const content: IContent = {
     msgtype: MsgType.Audio,
     filename: file.name,
@@ -137,6 +138,14 @@ export const getAudioMsgContent = (item: TUploadItem, mxc: string): IContent => 
       size: file.size,
     },
   };
+  if (metadata?.voice) {
+    const { duration, waveform } = metadata.voice;
+    content.info.duration = duration;
+    content[MATRIX_VOICE_MESSAGE_PROPERTY_NAME] = {
+      duration,
+      waveform,
+    };
+  }
   if (encInfo) {
     content.file = {
       ...encInfo,

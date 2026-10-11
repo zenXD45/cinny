@@ -22,8 +22,10 @@ import {
   IThumbnailContent,
   IVideoContent,
   IVideoInfo,
+  IVoiceAudio,
   MATRIX_SPOILER_PROPERTY_NAME,
   MATRIX_SPOILER_REASON_PROPERTY_NAME,
+  MATRIX_VOICE_MESSAGE_PROPERTY_NAME,
 } from '../../../types/matrix/common';
 import { FALLBACK_MIMETYPE, getBlobSafeMimeType } from '../../utils/mimeTypes';
 import { parseGeoUri, scaleYDimension } from '../../utils/common';
@@ -289,6 +291,7 @@ type RenderAudioContentProps = {
   mimeType: string;
   url: string;
   encInfo?: IEncryptedFile;
+  waveform?: number[];
 };
 type MAudioProps = {
   content: IAudioContent;
@@ -300,6 +303,8 @@ export function MAudio({ content, renderAsFile, renderAudioContent, outlined }: 
   const audioInfo = content?.info;
   const mxcUrl = content.file?.url ?? content.url;
   const safeMimeType = getBlobSafeMimeType(audioInfo?.mimetype ?? '');
+  const voiceAudio: IVoiceAudio | undefined =
+    content[MATRIX_VOICE_MESSAGE_PROPERTY_NAME] ?? content.audio;
 
   if (!audioInfo || !safeMimeType.startsWith('audio') || typeof mxcUrl !== 'string') {
     if (mxcUrl) {
@@ -332,6 +337,7 @@ export function MAudio({ content, renderAsFile, renderAudioContent, outlined }: 
             mimeType: safeMimeType,
             url: mxcUrl,
             encInfo: content.file,
+            waveform: voiceAudio?.waveform,
           })}
         </AttachmentContent>
       </AttachmentBox>

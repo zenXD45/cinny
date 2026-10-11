@@ -62,6 +62,7 @@ import {
   getImageInfo,
   getMxIdLocalPart,
   mxcUrlToHttp,
+  uploadContent,
 } from '../../utils/matrix';
 import { useTypingStatusUpdater } from '../../hooks/useTypingStatusUpdater';
 import { useFilePicker } from '../../hooks/useFilePicker';
@@ -89,7 +90,11 @@ import {
   createUploadFamilyObserverAtom,
 } from '../../state/upload';
 import { getImageUrlBlob, loadImageElement } from '../../utils/dom';
-import { safeFile } from '../../utils/mimeTypes';
+import { getBlobSafeMimeType, safeFile } from '../../utils/mimeTypes';
+import { getVoiceMessageFileName, isVoiceRecordingSupported } from '../../utils/voice';
+import { VoiceRecorderBar } from '../../components/voice-recorder';
+import { VoiceRecording } from '../../hooks/useVoiceRecorder';
+import { useVoiceHold, VOICE_HOLD_STICKY_THRESHOLD_MS } from '../../hooks/useVoiceHold';
 import { fulfilledPromiseSettledResult } from '../../utils/common';
 import { useSetting } from '../../state/hooks/settings';
 import { settingsAtom } from '../../state/settings';
@@ -161,6 +166,15 @@ export const RoomInput = forwardRef<HTMLDivElement, RoomInputProps>(
       legacyUsernameColor || direct ? colorMXID(replyUserID ?? '') : replyPowerColor;
 
     const [uploadBoard, setUploadBoard] = useState(true);
+    const [voiceMode, setVoiceMode] = useState(false);
+    const voiceStopControllerRef = useRef<{ requestStop: () => void } | undefined>(undefined);
+    const openVoiceMode = useCallback(() => setVoiceMode(true), []);
+    const handleVoiceHoldRelease = useCallback((heldMs: number) => {
+      if (heldMs >= VOICE_HOLD_STICKY_THRESHOLD_MS) {
+        voiceStopControllerRef.current?.requestStop();
+      }
+    }, []);
+    const voiceHold = useVoiceHold(openVoiceMode, handleVoiceHoldRelease);
     const [selectedFiles, setSelectedFiles] = useAtom(roomIdToUploadItemsAtomFamily(roomId));
     const uploadFamilyObserverAtom = createUploadFamilyObserverAtom(
       roomUploadAtomFamily,
@@ -274,6 +288,43 @@ export const RoomInput = forwardRef<HTMLDivElement, RoomInputProps>(
       });
       handleRemoveUpload(uploads.map((upload) => upload.file));
     };
+
+    const handleSendVoice = useCallback(
+      async (voiceRecording: VoiceRecording) => {
+        const { blob, mimeType, durationMs, waveform } = voiceRecording;
+        const voiceFile = new File([blob], getVoiceMessageFileName(mimeType), {
+          type: getBlobSafeMimeType(mimeType),
+        });
+        const metadata: TUploadMetadata = {
+          markedAsSpoiler: false,
+          voice: { duration: durationMs, waveform },
+        };
+
+        let fileItem: TUploadItem;
+        if (room.hasEncryptionStateEvent()) {
+          const enc = await encryptFile(voiceFile);
+          fileItem = { ...enc, metadata };
+        } else {
+          fileItem = {
+            file: voiceFile,
+            originalFile: voiceFile,
+            encInfo: undefined,
+            metadata,
+          };
+        }
+
+        const mxc = await new Promise<string>((resolve, reject) => {
+          uploadContent(mx, fileItem.file, {
+            onSuccess: resolve,
+            onError: (err) => reject(err),
+          });
+        });
+
+        const content = getAudioMsgContent(fileItem, mxc);
+        mx.sendMessage(roomId, content as any);
+      },
+      [mx, roomId, room]
+    );
 
     const handleSendUpload = async (uploads: UploadSuccess[]) => {
       const contentsPromises = uploads.map(async (upload) => {
@@ -544,42 +595,53 @@ export const RoomInput = forwardRef<HTMLDivElement, RoomInputProps>(
           onKeyUp={handleKeyUp}
           onPaste={handlePaste}
           top={
-            replyDraft && (
+            voiceMode ? (
               <div>
-                <Box
-                  alignItems="Center"
-                  gap="300"
-                  style={{ padding: `${config.space.S200} ${config.space.S300} 0` }}
-                >
-                  <IconButton
-                    onClick={() => setReplyDraft(undefined)}
-                    variant="SurfaceVariant"
-                    size="300"
-                    radii="300"
-                  >
-                    <Icon src={Icons.Cross} size="50" />
-                  </IconButton>
-                  <Box direction="Row" gap="200" alignItems="Center">
-                    {replyDraft.relation?.rel_type === RelationType.Thread && <ThreadIndicator />}
-                    <ReplyLayout
-                      userColor={replyUsernameColor}
-                      username={
-                        <Text size="T300" truncate>
-                          <b>
-                            {getMemberDisplayName(room, replyDraft.userId) ??
-                              getMxIdLocalPart(replyDraft.userId) ??
-                              replyDraft.userId}
-                          </b>
-                        </Text>
-                      }
-                    >
-                      <Text size="T300" truncate>
-                        {trimReplyFromBody(replyDraft.body)}
-                      </Text>
-                    </ReplyLayout>
-                  </Box>
-                </Box>
+                <Line variant="SurfaceVariant" size="300" />
+                <VoiceRecorderBar
+                  onSend={handleSendVoice}
+                  onCancel={() => setVoiceMode(false)}
+                  stopControllerRef={voiceStopControllerRef}
+                />
               </div>
+            ) : (
+              replyDraft && (
+                <div>
+                  <Box
+                    alignItems="Center"
+                    gap="300"
+                    style={{ padding: `${config.space.S200} ${config.space.S300} 0` }}
+                  >
+                    <IconButton
+                      onClick={() => setReplyDraft(undefined)}
+                      variant="SurfaceVariant"
+                      size="300"
+                      radii="300"
+                    >
+                      <Icon src={Icons.Cross} size="50" />
+                    </IconButton>
+                    <Box direction="Row" gap="200" alignItems="Center">
+                      {replyDraft.relation?.rel_type === RelationType.Thread && <ThreadIndicator />}
+                      <ReplyLayout
+                        userColor={replyUsernameColor}
+                        username={
+                          <Text size="T300" truncate>
+                            <b>
+                              {getMemberDisplayName(room, replyDraft.userId) ??
+                                getMxIdLocalPart(replyDraft.userId) ??
+                                replyDraft.userId}
+                            </b>
+                          </Text>
+                        }
+                      >
+                        <Text size="T300" truncate>
+                          {trimReplyFromBody(replyDraft.body)}
+                        </Text>
+                      </ReplyLayout>
+                    </Box>
+                  </Box>
+                </div>
+              )
             )
           }
           before={
@@ -594,6 +656,18 @@ export const RoomInput = forwardRef<HTMLDivElement, RoomInputProps>(
           }
           after={
             <>
+              {!voiceMode && isVoiceRecordingSupported() && (
+                <IconButton
+                  aria-label="Record voice message"
+                  onPointerDown={voiceHold.onPointerDown}
+                  onClick={openVoiceMode}
+                  variant="SurfaceVariant"
+                  size="300"
+                  radii="300"
+                >
+                  <Icon src={Icons.Mic} />
+                </IconButton>
+              )}
               <IconButton
                 variant="SurfaceVariant"
                 size="300"

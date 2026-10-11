@@ -52,12 +52,7 @@ import {
   getMemberAvatarMxc,
   getMemberDisplayName,
 } from '../../../utils/room';
-import {
-  getCanonicalAliasOrRoomId,
-  getMxIdLocalPart,
-  isRoomAlias,
-  mxcUrlToHttp,
-} from '../../../utils/matrix';
+import { getMxIdLocalPart, mxcUrlToHttp } from '../../../utils/matrix';
 import { MessageLayout, MessageSpacing } from '../../../state/settings';
 import { useMatrixClient } from '../../../hooks/useMatrixClient';
 import { useRecentEmoji } from '../../../hooks/useRecentEmoji';
@@ -67,6 +62,8 @@ import { TextViewer } from '../../../components/text-viewer';
 import { AsyncStatus, useAsyncCallback } from '../../../hooks/useAsyncCallback';
 import { EmojiBoard } from '../../../components/emoji-board';
 import { ReactionViewer } from '../reaction-viewer';
+import { ForwardMessageModal } from '../../../features/forward-message';
+import { isForwardableEvent } from '../../../utils/forward';
 import { MessageEditor } from './MessageEditor';
 import { UserAvatar } from '../../../components/user-avatar';
 import { copyToClipboard } from '../../../utils/dom';
@@ -316,6 +313,67 @@ export const MessageSourceCodeItem = as<
   );
 });
 
+export const MessageForwardItem = as<
+  'button',
+  {
+    room: Room;
+    mEvent: MatrixEvent;
+    onClose?: () => void;
+  }
+>(({ room, mEvent, onClose, ...props }, ref) => {
+  const [open, setOpen] = useState(false);
+
+  const handleClose = () => {
+    setOpen(false);
+    onClose?.();
+  };
+
+  return (
+    <>
+      <Overlay
+        onContextMenu={(evt: any) => {
+          evt.stopPropagation();
+        }}
+        open={open}
+        backdrop={<OverlayBackdrop />}
+      >
+        <OverlayCenter>
+          <FocusTrap
+            focusTrapOptions={{
+              initialFocus: false,
+              returnFocusOnDeactivate: false,
+              onDeactivate: () => handleClose(),
+              clickOutsideDeactivates: true,
+              escapeDeactivates: stopPropagation,
+            }}
+          >
+            <Modal variant="Surface" size="300">
+              <ForwardMessageModal
+                room={room}
+                mEvent={mEvent}
+                requestClose={() => setOpen(false)}
+              />
+            </Modal>
+          </FocusTrap>
+        </OverlayCenter>
+      </Overlay>
+      <MenuItem
+        size="300"
+        after={<Icon size="100" src={Icons.ArrowGoRight} />}
+        radii="300"
+        onClick={() => setOpen(true)}
+        {...props}
+        ref={ref}
+        aria-pressed={open}
+      >
+        <Text className={css.MessageMenuItemText} as="span" size="T300" truncate>
+          Forward
+        </Text>
+      </MenuItem>
+    </>
+  );
+});
+
 export const MessageCopyLinkItem = as<
   'button',
   {
@@ -324,8 +382,6 @@ export const MessageCopyLinkItem = as<
     onClose?: () => void;
   }
 >(({ room, mEvent, onClose, ...props }, ref) => {
-  const mx = useMatrixClient();
-
   const handleCopy = () => {
     const eventId = mEvent.getId();
     if (!eventId) return;
@@ -1085,6 +1141,9 @@ export const Message = as<'div', MessageProps>(
                             />
                           )}
                           <MessageCopyLinkItem room={room} mEvent={mEvent} onClose={closeMenu} />
+                          {isForwardableEvent(mEvent) && (
+                            <MessageForwardItem room={room} mEvent={mEvent} onClose={closeMenu} />
+                          )}
                           {canPinEvent && (
                             <MessagePinItem room={room} mEvent={mEvent} onClose={closeMenu} />
                           )}

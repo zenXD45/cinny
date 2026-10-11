@@ -1,5 +1,5 @@
 /* eslint-disable jsx-a11y/media-has-caption */
-import React, { ReactNode, useCallback, useRef, useState } from 'react';
+import React, { ReactNode, useCallback, useMemo, useRef, useState } from 'react';
 import { Badge, Chip, Icon, IconButton, Icons, ProgressBar, Spinner, Text, toRem } from 'folds';
 import { EncryptedAttachmentInfo } from 'browser-encrypt-attachment';
 import { Range } from 'react-range';
@@ -16,6 +16,7 @@ import {
 } from '../../../hooks/media';
 import { useThrottle } from '../../../hooks/useThrottle';
 import { secondsToMinutesAndSeconds } from '../../../utils/common';
+import { PLAYER_WAVEFORM_BARS, waveformToAmplitudes } from '../../../utils/voice';
 import {
   decryptFile,
   downloadEncryptedMedia,
@@ -23,6 +24,7 @@ import {
   mxcUrlToHttp,
 } from '../../../utils/matrix';
 import { useMediaAuthentication } from '../../../hooks/useMediaAuthentication';
+import { WaveformBar, WaveformBarActive, WaveformTrack } from './style.css';
 
 const PLAY_TIME_THROTTLE_OPS = {
   wait: 500,
@@ -40,6 +42,7 @@ export type AudioContentProps = {
   url: string;
   info: IAudioInfo;
   encInfo?: EncryptedAttachmentInfo;
+  waveform?: number[];
   renderMediaControl: (props: RenderMediaControlProps) => ReactNode;
 };
 export function AudioContent({
@@ -47,6 +50,7 @@ export function AudioContent({
   url,
   info,
   encInfo,
+  waveform,
   renderMediaControl,
 }: AudioContentProps) {
   const mx = useMatrixClient();
@@ -69,6 +73,14 @@ export function AudioContent({
   // duration in seconds. (NOTE: info.duration is in milliseconds)
   const infoDuration = info.duration ?? 0;
   const [duration, setDuration] = useState((infoDuration >= 0 ? infoDuration : 0) / 1000);
+
+  const waveAmplitudes = useMemo(
+    () =>
+      waveform && waveform.length > 0
+        ? waveformToAmplitudes(waveform, PLAYER_WAVEFORM_BARS)
+        : undefined,
+    [waveform]
+  );
 
   const getAudioRef = useCallback(() => audioRef.current, []);
   const { loading } = useMediaLoading(getAudioRef);
@@ -103,15 +115,32 @@ export function AudioContent({
         renderTrack={(params) => (
           <div {...params.props}>
             {params.children}
-            <ProgressBar
-              as="div"
-              variant="Secondary"
-              size="300"
-              min={0}
-              max={duration}
-              value={currentTime}
-              radii="300"
-            />
+            {waveAmplitudes ? (
+              <div className={WaveformTrack}>
+                {waveAmplitudes.map((amp, index) => (
+                  <span
+                    // eslint-disable-next-line react/no-array-index-key
+                    key={index}
+                    className={
+                      duration > 0 && index / waveAmplitudes.length <= currentTime / duration
+                        ? WaveformBarActive
+                        : WaveformBar
+                    }
+                    style={{ height: `${Math.max(10, amp * 100)}%` }}
+                  />
+                ))}
+              </div>
+            ) : (
+              <ProgressBar
+                as="div"
+                variant="Secondary"
+                size="300"
+                min={0}
+                max={duration}
+                value={currentTime}
+                radii="300"
+              />
+            )}
           </div>
         )}
         renderThumb={(params) => (
